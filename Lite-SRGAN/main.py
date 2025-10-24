@@ -7,6 +7,7 @@ from tqdm import tqdm
 
 # -----------------------------
 # Argument Parser (unchanged)
+
 # -----------------------------
 parser = argparse.ArgumentParser(description='light-SRGAN training script.')
 
