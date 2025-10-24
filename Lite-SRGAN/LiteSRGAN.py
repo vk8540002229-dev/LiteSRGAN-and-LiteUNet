@@ -518,7 +518,9 @@ class LiteSRGAN_engine():
         style_loss_list = []
         train_iterations=0
         # loop over the data generator
-        for lr, hr, last_batch in data:
+        progress_bar = tqdm(data, desc=f"Training Epoch {epoch}", unit="batch")
+
+        for lr, hr, last_batch in progress_bar:
 
             disc_loss, adv_loss, perceptual_loss, pixel_loss, style_loss = self.train_on_batch( lr, hr)
 
@@ -527,6 +529,12 @@ class LiteSRGAN_engine():
             perceptual_loss_list.append(perceptual_loss.numpy())
             pixel_loss_list.append(pixel_loss.numpy())
             style_loss_list.append(style_loss.numpy())
+
+            progress_bar.set_postfix({
+            "D_loss": float(disc_loss.numpy()),
+            "G_pixel": float(pixel_loss.numpy()),
+            "G_percep": float(perceptual_loss.numpy())
+        })
             # print the value of each loss function when the verboseIter is reached
             if train_iterations % verboseIter == 0:
 
@@ -552,7 +560,8 @@ class LiteSRGAN_engine():
                 disc_loss_list.clear()
                 adv_loss_list.clear()
                 perceptual_loss_list.clear()
-                mse_loss_list.clear()
+                #mse_loss_list.clear()
+                pixel_loss_list.clear()
                 style_loss_list.clear()
 
                 break
@@ -565,6 +574,8 @@ class LiteSRGAN_engine():
         :param epoch: number of the current epoch.
         :return: None.
         """
+        
+        
         random_samples=self.images[:n_samples]
         for index , img in enumerate(random_samples):
             low_res = cv2.imread(img, 1)
@@ -580,7 +591,7 @@ class LiteSRGAN_engine():
             # Rescale values in range 0-255
             sr = (((sr + 1) / 2.) * 255).astype(np.uint8)
 
-            plt.imsave("generatedTrails/{}_".format(index) + str(epoch) + '.png', sr)
+            plt.imsave("/content/drive/MyDrive/LiteSRGAN_data/generatedTrails/{}_".format(index) + str(epoch) + '.png', sr)
 
 
 
