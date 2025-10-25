@@ -54,6 +54,42 @@ def get_latest_checkpoint(dir_path, prefix):
     epoch_num = int(latest.split('_')[-1].split('.')[0])
     return os.path.join(dir_path, latest), epoch_num
 
+
+def get_latest_checkpoint_training(dir_path, prefix, model_type):
+    """
+    Find the latest training checkpoint for either 'generator' or 'discriminator'.
+
+    Args:
+        dir_path (str): checkpoint directory path
+        prefix (str): prefix of training files, e.g. 'training_'
+        model_type (str): 'generator' or 'discriminator'
+
+    Returns:
+        tuple: (latest_checkpoint_path, epoch_number)
+    """
+    # filter files like training_8_generator.weights.h5
+    ckpts = [f for f in os.listdir(dir_path)
+             if f.startswith(prefix) and model_type in f and f.endswith('.weights.h5')]
+
+    if not ckpts:
+        return None, -1
+
+    # extract epoch safely before "_generator" or "_discriminator"
+    def extract_epoch(fname):
+        parts = fname.split('_')
+        for p in parts:
+            if p.isdigit():
+                return int(p)
+        return -1  # fallback
+
+    ckpts.sort(key=extract_epoch)
+    latest = ckpts[-1]
+    epoch_num = extract_epoch(latest)
+    return os.path.join(dir_path, latest), epoch_num
+
+
+
+
 # -----------------------------
 # Initialize DataLoader and Model
 # -----------------------------
@@ -90,16 +126,19 @@ print("------------- End of generator pre-training -------------")
 # =========================================================
 # === MAIN TRAINING PHASE (resumable .weights.h5 checkpoints)
 # =========================================================
-latest_train_gen, start_train_epoch = get_latest_checkpoint(TRAIN_DIR, "training_")
-latest_train_disc, _ = get_latest_checkpoint(TRAIN_DIR, "training_")
+latest_train_gen, start_train_epoch = get_latest_checkpoint_training(TRAIN_DIR, "training_", "generator")
+latest_train_disc, start_train_epoch_disc = get_latest_checkpoint_training(TRAIN_DIR, "training_", "discriminator")
 
-if latest_train_gen and latest_train_disc:
+# Check if both checkpoints exist and belong to the same epoch
+if latest_train_gen and latest_train_disc and (start_train_epoch == start_train_epoch_disc):
     lite_SRGAN.generator.load_weights(latest_train_gen)
     lite_SRGAN.discriminator.load_weights(latest_train_disc)
-    print(f"✅ Resumed full training from {latest_train_gen} (epoch {start_train_epoch})")
+    print(f"✅ Resumed full training from epoch {start_train_epoch}")
+    print(f"   ↳ Generator:     {latest_train_gen}")
+    print(f"   ↳ Discriminator: {latest_train_disc}")
 else:
     print("⚙️ Starting full SRGAN training from scratch...")
-    start_train_epoch = -1  # No checkpoint yet
+    start_train_epoch = -1  # No valid checkpoint pair found
 
 # -----------------------------
 # Optimizers (fallback if missing)
