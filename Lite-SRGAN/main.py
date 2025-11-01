@@ -4,10 +4,11 @@ import argparse
 import tensorflow as tf
 import os
 from tqdm import tqdm
+import time
+import numpy as np
 
 # -----------------------------
 # Argument Parser (unchanged)
-
 # -----------------------------
 parser = argparse.ArgumentParser(description='light-SRGAN training script.')
 
@@ -21,7 +22,7 @@ parser.add_argument('--lr', default=1e-4, type=float)
 parser.add_argument('--decay_steps', default=50000, type=int)
 parser.add_argument('--decay_rate', default=0.1, type=float)
 parser.add_argument('--epochs', default=100, type=int)
-parser.add_argument('--pretraining_epochs', default=9, type=int)
+parser.add_argument('--pretraining_epochs', default=3, type=int)
 parser.add_argument('--generator_weights', default=None, type=str)
 parser.add_argument('--discriminator_weights', default=None, type=str)
 
@@ -43,7 +44,7 @@ for d in [BASE_DIR, MODELS_DIR, GEN_DIR, CKPT_DIR, PRETRAIN_DIR, TRAIN_DIR]:
 print(f"✅ All training data will be stored under: {BASE_DIR}")
 
 # -----------------------------
-# Helper: find latest checkpoint by filename
+# Helper functions
 # -----------------------------
 def get_latest_checkpoint(dir_path, prefix):
     ckpts = [f for f in os.listdir(dir_path) if f.startswith(prefix) and f.endswith('.weights.h5')]
@@ -56,38 +57,23 @@ def get_latest_checkpoint(dir_path, prefix):
 
 
 def get_latest_checkpoint_training(dir_path, prefix, model_type):
-    """
-    Find the latest training checkpoint for either 'generator' or 'discriminator'.
-
-    Args:
-        dir_path (str): checkpoint directory path
-        prefix (str): prefix of training files, e.g. 'training_'
-        model_type (str): 'generator' or 'discriminator'
-
-    Returns:
-        tuple: (latest_checkpoint_path, epoch_number)
-    """
-    # filter files like training_8_generator.weights.h5
     ckpts = [f for f in os.listdir(dir_path)
              if f.startswith(prefix) and model_type in f and f.endswith('.weights.h5')]
 
     if not ckpts:
         return None, -1
 
-    # extract epoch safely before "_generator" or "_discriminator"
     def extract_epoch(fname):
         parts = fname.split('_')
         for p in parts:
             if p.isdigit():
                 return int(p)
-        return -1  # fallback
+        return -1
 
     ckpts.sort(key=extract_epoch)
     latest = ckpts[-1]
     epoch_num = extract_epoch(latest)
     return os.path.join(dir_path, latest), epoch_num
-
-
 
 
 # -----------------------------
@@ -101,7 +87,7 @@ lite_SRGAN_engine = LiteSRGAN_engine(args, lite_SRGAN)
 print("last layer shape of discriminator: ", lite_SRGAN.discriminator.output_shape)
 
 # =========================================================
-# === PRETRAINING PHASE (resumable .weights.h5 checkpoints)
+# === PRETRAINING PHASE ===================================
 # =========================================================
 latest_pre_ckpt, start_pre_epoch = get_latest_checkpoint(PRETRAIN_DIR, "pretraining_")
 
@@ -110,13 +96,12 @@ if latest_pre_ckpt:
     print(f"🔁 Resumed generator pretraining from {latest_pre_ckpt} (epoch {start_pre_epoch})")
 else:
     print("🚀 Starting generator pretraining from scratch...")
-    start_pre_epoch = -1  # No checkpoint yet
+    start_pre_epoch = -1
 
 for i in range(start_pre_epoch + 1, args.pretraining_epochs):
     print(f"------------- Pre-training epoch {i} -------------")
     lite_SRGAN_engine.generator_pretraining(datagen, i)
 
-    # save weights in TF3-compatible format
     save_path = os.path.join(PRETRAIN_DIR, f"pretraining_{i}.weights.h5")
     lite_SRGAN.generator.save_weights(save_path)
     print(f"💾 Saved pretraining checkpoint: {save_path}")
@@ -124,33 +109,18 @@ for i in range(start_pre_epoch + 1, args.pretraining_epochs):
 print("------------- End of generator pre-training -------------")
 
 # =========================================================
-# === MAIN TRAINING PHASE (resumable .weights.h5 checkpoints)
+# === MAIN TRAINING PHASE =================================
 # =========================================================
 latest_train_gen, start_train_epoch = get_latest_checkpoint_training(TRAIN_DIR, "training_", "generator")
 latest_train_disc, start_train_epoch_disc = get_latest_checkpoint_training(TRAIN_DIR, "training_", "discriminator")
 
-# Check if both checkpoints exist and belong to the same epoch
 if latest_train_gen and latest_train_disc and (start_train_epoch == start_train_epoch_disc):
     lite_SRGAN.generator.load_weights(latest_train_gen)
     lite_SRGAN.discriminator.load_weights(latest_train_disc)
     print(f"✅ Resumed full training from epoch {start_train_epoch}")
-    print(f"   ↳ Generator:     {latest_train_gen}")
-    print(f"   ↳ Discriminator: {latest_train_disc}")
 else:
     print("⚙️ Starting full SRGAN training from scratch...")
-    start_train_epoch = -1  # No valid checkpoint pair found
-
-# -----------------------------
-# Optimizers (fallback if missing)
-# -----------------------------
-try:
-    g_opt = lite_SRGAN_engine.g_optimizer
-except AttributeError:
-    g_opt = tf.keras.optimizers.Adam(args.lr)
-try:
-    d_opt = lite_SRGAN_engine.d_optimizer
-except AttributeError:
-    d_opt = tf.keras.optimizers.Adam(args.lr)
+    start_train_epoch = -1
 
 # -----------------------------
 # Training Loop
@@ -158,21 +128,59 @@ except AttributeError:
 for i in range(start_train_epoch + 1, args.epochs):
     print(f"============= SRGAN Training Epoch {i} =============")
     datagen = dl.dataGenerator()
+
     lite_SRGAN_engine.train(datagen, 100, i)
     lite_SRGAN_engine.saveTrails(4, i)
 
-    # save model weights
     gen_path = os.path.join(MODELS_DIR, f'generator_epoch_{i+1}.weights.h5')
     disc_path = os.path.join(MODELS_DIR, f'discriminator_epoch_{i+1}.weights.h5')
     lite_SRGAN.generator.save_weights(gen_path)
     lite_SRGAN.discriminator.save_weights(disc_path)
-    print(f"💾 Saved model weights for epoch {i+1}")
 
-    # save training checkpoints (so resume works automatically)
     gen_ckpt_path = os.path.join(TRAIN_DIR, f"training_{i}_generator.weights.h5")
     disc_ckpt_path = os.path.join(TRAIN_DIR, f"training_{i}_discriminator.weights.h5")
     lite_SRGAN.generator.save_weights(gen_ckpt_path)
     lite_SRGAN.discriminator.save_weights(disc_ckpt_path)
+
     print(f"📍 Saved training checkpoint after epoch {i+1}")
+
+    # ==================================================
+    # === METRICS EVERY 3 EPOCHS =======================
+    # ==================================================
+    if (i + 1) % 7 == 0:
+        print("\n🔍 Running Evaluation ...")
+        psnr_scores, ssim_scores, runtime_list = [], [], []
+
+        eval_gen = dl.dataGenerator()
+
+        for _ in tqdm(range(50), desc="Evaluating metrics"):
+            try:
+                lr, hr,_= next(eval_gen)
+            except StopIteration:
+                break
+
+            start = time.time()
+            sr = lite_SRGAN.generator(lr, training=False)
+            runtime_list.append(time.time() - start)
+
+            sr = tf.clip_by_value(sr, 0.0, 1.0)
+            hr = tf.clip_by_value(hr, 0.0, 1.0)
+
+            min_b = min(sr.shape[0], hr.shape[0])
+            sr = sr[:min_b]
+            hr = hr[:min_b]
+
+            for s, h in zip(sr, hr):
+                psnr_scores.append(tf.image.psnr(s, h, max_val=1.0).numpy())
+                ssim_scores.append(tf.image.ssim(s, h, max_val=1.0).numpy())
+
+        if len(psnr_scores) > 0:
+            print("\n📊 ====== METRICS REPORT ======")
+            print(f"Epoch: {i+1}")
+            print(f"Average PSNR   : {np.mean(psnr_scores):.4f} dB")
+            print(f"Average SSIM   : {np.mean(ssim_scores):.4f}")
+            print(f"Average Runtime: {np.mean(runtime_list):.6f} sec/image\n")
+        else:
+            print("⚠️ Metrics skipped: No valid samples found.\n")
 
 print("🎉 Training completed and all data saved to Google Drive.")
