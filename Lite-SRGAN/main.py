@@ -22,7 +22,7 @@ parser.add_argument('--lr', default=1e-4, type=float)
 parser.add_argument('--decay_steps', default=50000, type=int)
 parser.add_argument('--decay_rate', default=0.1, type=float)
 parser.add_argument('--epochs', default=100, type=int)
-parser.add_argument('--pretraining_epochs', default=3, type=int)
+parser.add_argument('--pretraining_epochs', default=50, type=int)
 parser.add_argument('--generator_weights', default=None, type=str)
 parser.add_argument('--discriminator_weights', default=None, type=str)
 
