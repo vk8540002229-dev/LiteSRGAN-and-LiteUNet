@@ -120,7 +120,7 @@ def VGG19(
             layer.set_weights([w, b])
             xavier_applied=True
     if xavier_applied:
-        print("✅ Xavier initialization applied for VGG19.")
+        print(" Xavier initialization applied for VGG19.")
     return model
 
 
