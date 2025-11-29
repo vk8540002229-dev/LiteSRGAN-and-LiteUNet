@@ -7,14 +7,6 @@ import tensorflow as tf
 import keras
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-# from keras.applications.mobilenet_v2 import MobileNetV2
-# from VGG19 import VGG19,preprocess_input
-# from keras.models import Model
-# from keras.layers import Conv2D,MaxPooling2D,Activation, BatchNormalization,Flatten,Dense,Dropout,InputLayer,DepthwiseConv2D , Add ,  UpSampling2D, Input, Concatenate
-# from keras.models import Sequential
-# from keras.losses import BinaryCrossentropy,MeanSquaredError,MeanAbsoluteError
-# from tensorflow.keras.optimizers.schedules import PiecewiseConstantDecay
-# from keras import optimizers
 
 
 from tensorflow.keras import backend as K
@@ -46,33 +38,25 @@ class LiteSRGAN():
         self.img_width=args.img_width
         self.discriminator_weights=args.discriminator_weights
         self.generator_weights=args.generator_weights
-        # initial number of filters for generator and discriminator
         self.gen_filters = 32
         self.disc_filters = 8
-        # number of generator residual blocks
         self.gen_residual_blocks = 12 
 
 
-        # Define a learning rate decay schedule for both generator and discriminator.
         self.gen_lr_schedule = PiecewiseConstantDecay(boundaries=[self.decay_steps], values=[self.lr, self.lr*self.decay_rate])  
         self.disc_lr_schedule = PiecewiseConstantDecay(boundaries=[ self.decay_steps], values=[self.lr, self.lr*self.decay_rate])
 
         self.gen_optimizer = tf.keras.optimizers.Adam(learning_rate=self.gen_lr_schedule)
         self.disc_optimizer = tf.keras.optimizers.Adam(learning_rate=self.disc_lr_schedule)
 
-        # build VGG19 network that outputs high level features suitable for computing perceptual loss
         self.vgg_perceptual = self.build_vgg(loss="perceptual")
         
-        #build VGG19 network that outputs the features from multiple layers (low and high level features suitable for computing style/texture loss)
         self.vgg_style=self.build_vgg(loss="style")
         
-        # if you want to use the features from mobilenet instead of vgg for perceptual_loss
         self.mobileNet = self.build_mobilenet()
 
-        # discriminator downsampling factor (4 strided convolution)
         disc_downsampling_factor= 2 ** 4
 
-        #verify that the image width and height is larger than the discrimiantor downsampling factor used
         patch_h = int(self.img_height / disc_downsampling_factor)
         patch_w= int(self.img_width / disc_downsampling_factor)
 
@@ -80,8 +64,6 @@ class LiteSRGAN():
         assert patch_h >= 1 , f"The provided image height is expected to be greater than {disc_downsampling_factor}"
         assert patch_w >= 1 , f"The provided image width is expected to be greater than {disc_downsampling_factor}"
         self.disc_patch = (patch_h, patch_w, 1)
-
-        # build the generator and discriminator models
         self.discriminator = self.build_discriminator()
         self.generator = self.build_generator()
 
@@ -115,11 +97,8 @@ class LiteSRGAN():
         vgg.trainable = False
 
         if loss.lower()=="perceptual":
-            # Get the vgg network. Extract features from Block 5, last convolution.
-            # Note: we extract the last layer before activation instead of after it to produce better textures and visual results as proposed by Xintao Wang et al.
             model = Model(inputs=vgg.input, outputs=vgg.get_layer("block5_conv4_before_activation").output)
         elif loss.lower()=="style":
-            #style loss is computed based on different low/high level features from VGG19 network where it tries to preserve the texture,color as well as the content between the original image and the generated one
             model = Model(inputs=vgg.input, outputs=[vgg.get_layer("block1_conv1").output,
                                                                   vgg.get_layer("block2_conv1").output,
                                                                   vgg.get_layer("block3_conv1").output,
@@ -164,12 +143,10 @@ class LiteSRGAN():
         tensor_shape = K.shape(input)
         B, C, H, W = tensor_shape[0], tensor_shape[1], tensor_shape[2], tensor_shape[3]
 
-        # Reshape the input and do batch dot product
         matrix = K.reshape(input, K.stack([B, C, H * W]))
 
         gram_matrix = K.batch_dot(matrix, matrix, axes=2)
 
-        # normalize the gram_matrix with Height , Width and Channels
         gram_matrix = gram_matrix / K.cast(H * W * C, input.dtype)
         return gram_matrix
 
@@ -236,7 +213,6 @@ class LiteSRGAN():
         for layer in mobileNet.layers:
             layer.trainable = False
 
-        # Create model and compile
         model = Model(inputs=mobileNet.input,
                                    outputs=mobileNet.get_layer("block_15_depthwise_relu").output)
 
@@ -262,13 +238,11 @@ class LiteSRGAN():
 
             in_channels = K.int_shape(inputs)[channel_axis]
             pointwise_conv_filters = int(filters * alpha)
-            #Ensure the number of filters on the last 1x1 convolution is divisible by 8
             pointwise_filters = _make_divisible(pointwise_conv_filters, 8)
             x = inputs
             prefix = 'block_{}_'.format(block_id)
 
             if block_id:
-                # Expand with a pointwise 1x1 convolution (Expansion convolution)
                 x = keras.layers.Conv2D(expansion * in_channels,
                                         kernel_size=1,
                                         padding='same',
@@ -283,7 +257,6 @@ class LiteSRGAN():
             else:
                 prefix = 'expanded_conv_'
 
-            # Depthwise 3x3 conv
             x = keras.layers.DepthwiseConv2D(kernel_size=3,
                                              strides=stride,
                                              activation=None,
@@ -297,7 +270,6 @@ class LiteSRGAN():
 
             x = keras.layers.Activation('relu', name=prefix + 'depthwise_relu')(x)
 
-            #  Project with a pointwise 1x1 convolution (Projection convolution)
             x = keras.layers.Conv2D(pointwise_filters,
                                     kernel_size=1,
                                     padding='same',
@@ -333,26 +305,21 @@ class LiteSRGAN():
             if min_value is None:
                 min_value = divisor
             new_v = max(min_value, int(v + divisor / 2) // divisor * divisor)
-            # Make sure that round down does not go down by more than 10%.
             if new_v < 0.9 * v:
                 new_v += divisor
             return new_v
         
-        # Low resolution image input
         input_lr = keras.Input(
             shape=(int(self.img_height // (2**self.upsamplingblocks)), int(self.img_width // (2**self.upsamplingblocks)), 3))
 
-        # generator first block (pre-inverted residual blocks)
         c1 = keras.layers.Conv2D(self.gen_filters, kernel_size=3, strides=1, padding='same')(input_lr)
         c1 = keras.layers.BatchNormalization()(c1)
         c1 = keras.layers.PReLU(shared_axes=[1, 2])(c1)
 
-        # propagate through the inverted residual blocks
         r = _inverted_res_block(inputs=c1,expansion=6,stride=1,alpha=1.0,filters=self.gen_filters, block_id=0)
         for idx in range(1, self.gen_residual_blocks):
             r = _inverted_res_block(inputs=r, expansion=6,stride=1,alpha=1.0,filters=self.gen_filters,block_id=idx)
 
-        # post-inverted residual blocks
         c2 = keras.layers.Conv2D(self.gen_filters, kernel_size=3, strides=1, padding='same')(r)
         c2 = keras.layers.BatchNormalization()(c2)
         c2 = keras.layers.Add()([c2, c1])
@@ -360,9 +327,7 @@ class LiteSRGAN():
         generator_model = None
         if self.upsamplingblocks>=1:
 
-            # first upsample block
             u = _upsample_block(c2)
-            # propagate through the remaining upsample blocks
             for i in range(self.upsamplingblocks-1):
                 u= _upsample_block(u)
             out_hr = keras.layers.Conv2D(3, kernel_size=3, strides=1, padding='same', activation='tanh')(u)
@@ -399,7 +364,6 @@ class LiteSRGAN():
             d = keras.layers.LeakyReLU(alpha=0.2)(d)
 
             return d
-        # Input img
         d0 = keras.layers.Input(shape=(self.img_height, self.img_width, 3))
 
         d1 = d_block(d0, self.disc_filters, bn=False)
@@ -430,7 +394,7 @@ class LiteSRGAN_engine():
         self.upsamplingblocks=args.upsampling_blocks
         self.images_dir = args.images_dir
         self.images = sorted(glob.glob(os.path.join(self.images_dir, r"**/*.*"),
-                                       recursive=True))  ## Read images with any extension (jpg or JPG or jpeg or png)
+                                       recursive=True)) 
         self.model= LiteSRGAN_obj
         random.Random(10).shuffle(self.images) 
 
@@ -446,7 +410,6 @@ class LiteSRGAN_engine():
         
         print(f"\n------------- Pre-training epoch {epoch_num} -------------")
         
-        # Initialize tqdm progress bar
         progress_bar = tqdm(data, desc=f"Pretrain Epoch {epoch_num}", unit="batch")
 
         for lr, hr, last_batch in progress_bar:
@@ -457,7 +420,6 @@ class LiteSRGAN_engine():
             grads = tape.gradient(pixel_loss, self.model.generator.trainable_variables)
             self.model.gen_optimizer.apply_gradients(zip(grads, self.model.generator.trainable_variables))
 
-            # Update progress bar info
             progress_bar.set_postfix({"pixel_loss": float(pixel_loss.numpy())})
             
             if last_batch:
@@ -465,7 +427,7 @@ class LiteSRGAN_engine():
 
 
     @tf.function
-    def train_on_batch(self, lr, hr): #update step
+    def train_on_batch(self, lr, hr):
         """
         Update step for adjusting the weights of both generator and discriminator networks.
         :param lr: Low-resolution image.
@@ -474,13 +436,11 @@ class LiteSRGAN_engine():
         """
 
         with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
-            # generated super-resolved (SR) image when passing LR image to the generator network
             sr = self.model.generator(lr)
 
-            disc_hr_prediction = self.model.discriminator(hr)  # Shape :(batch size,16,16,1)
-            disc_sr_prediction = self.model.discriminator(sr)  # Shape :(batch size,16,16,1)
+            disc_hr_prediction = self.model.discriminator(hr) 
+            disc_sr_prediction = self.model.discriminator(sr) 
 
-            # The weight for each loss can be tuned for controlling the contribution of each loss to the total loss function
             perceptual_loss = 0.065 * self.model.PerceptualLoss(hr, sr,criterion="l2")
             adv_loss = 1e-3 * self.model.AdversarialLoss(disc_sr_prediction)
             pixel_loss = 0.2 * self.model.PixelLoss(hr, sr,criterion="l1")
@@ -489,14 +449,11 @@ class LiteSRGAN_engine():
 
             total_loss = perceptual_loss + adv_loss + pixel_loss + style_loss
 
-            # Discriminator loss
             disc_loss=self.model.DiscriminatorLoss(disc_hr_prediction,disc_sr_prediction)
 
-        # calculate the gradients and update the generator network weights
         gen_grads = gen_tape.gradient(total_loss, self.model.generator.trainable_variables)
         self.model.gen_optimizer.apply_gradients(zip(gen_grads, self.model.generator.trainable_variables))
 
-        # calculate the gradients and update the discriminator network weights
         disc_grads = disc_tape.gradient(disc_loss, self.model.discriminator.trainable_variables)
         self.model.disc_optimizer.apply_gradients(zip(disc_grads, self.model.discriminator.trainable_variables))
 
@@ -517,7 +474,6 @@ class LiteSRGAN_engine():
         pixel_loss_list = []
         style_loss_list = []
         train_iterations=0
-        # loop over the data generator
         progress_bar = tqdm(data, desc=f"Training Epoch {epoch}", unit="batch")
 
         for lr, hr, last_batch in progress_bar:
@@ -535,7 +491,7 @@ class LiteSRGAN_engine():
             "G_pixel": float(pixel_loss.numpy()),
             "G_percep": float(perceptual_loss.numpy())
         })
-            # print the value of each loss function when the verboseIter is reached
+            
             if train_iterations % verboseIter == 0:
 
                 print("[EP{}] ".format(epoch) + "Adversarial Loss= " + str(adv_loss.numpy()) \
@@ -544,7 +500,6 @@ class LiteSRGAN_engine():
                       + " Discriminator Loss= " + str(disc_loss.numpy()) \
                       + " Style Loss= " + str(style_loss.numpy()))
             
-            # save the generator and discriminator models at the end of each epoch
             if last_batch == True:
                 self.model.generator.save('models/generator.h5')
                 self.model.discriminator.save('models/discriminator.h5')
@@ -565,7 +520,7 @@ class LiteSRGAN_engine():
                 style_loss_list.clear()
 
                 break
-            train_iterations += 1  # increment after each batch
+            train_iterations += 1 
 
     def saveTrails(self,n_samples,epoch):
         """
@@ -579,16 +534,13 @@ class LiteSRGAN_engine():
         random_samples=self.images[:n_samples]
         for index , img in enumerate(random_samples):
             low_res = cv2.imread(img, 1)
-            # Convert to RGB (opencv uses BGR as default)
+            
             low_res = cv2.cvtColor(low_res, cv2.COLOR_BGR2RGB)
             low_res = cv2.resize(low_res, [self.img_width // (2 ** self.upsamplingblocks), self.img_height // (2 ** self.upsamplingblocks )])
-            # Rescale to 0-1.
             low_res = low_res / 255.0
 
-            # Get super resolution image
             sr = self.model.generator.predict(np.expand_dims(low_res, axis=0))[0]
 
-            # Rescale values in range 0-255
             sr = (((sr + 1) / 2.) * 255).astype(np.uint8)
 
             plt.imsave("/content/drive/MyDrive/LiteSRGAN_data/generatedTrails/{}_".format(index) + str(epoch) + '.png', sr)
