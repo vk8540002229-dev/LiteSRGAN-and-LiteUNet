@@ -9,7 +9,7 @@ data_utils = keras_utils
 layer_utils = keras_utils
 
 from tensorflow.python.util.tf_export import keras_export
-from tensorflow.keras.initializers import GlorotUniform  # ✅ Xavier init
+from tensorflow.keras.initializers import GlorotUniform 
 
 WEIGHTS_PATH = (
     "https://storage.googleapis.com/tensorflow/keras-applications/vgg19/vgg19_weights_tf_dim_ordering_tf_kernels.h5"
@@ -20,7 +20,7 @@ WEIGHTS_PATH_NO_TOP = (
 
 def VGG19(
     include_top=False,
-    weights=None,   # ✅ CHANGED: default is now None (no pretrained weights)
+    weights=None,
     input_tensor=None,
     input_shape=None,
     pooling=None,
@@ -41,7 +41,6 @@ def VGG19(
             'If using `weights="imagenet"` with include_top=True, classes must be 1000.'
         )
 
-    # ✅ Input shape handling
     if input_shape is None:
         input_shape = (224, 224, 3)
     else:
@@ -53,7 +52,6 @@ def VGG19(
     else:
         img_input = input_tensor if backend.is_keras_tensor(input_tensor) else Input(tensor=input_tensor, shape=input_shape)
 
-    # ------------- Model Architecture (Unchanged) -------------
     x = Conv2D(64, (3, 3), padding="same", name="block1_conv1_before_activation")(img_input)
     x = Activation("relu", name="block1_conv1")(x)
 
@@ -112,7 +110,6 @@ def VGG19(
 
     model = Model(img_input, x, name="vgg19")
 
-    # ✅ Xavier Initialization (This is the key change)
     initializer = GlorotUniform()
     xavier_applied = False
     for layer in model.layers:
