@@ -7,9 +7,6 @@ from tqdm import tqdm
 import time
 import numpy as np
 
-# -----------------------------
-# Argument Parser (unchanged)
-# -----------------------------
 parser = argparse.ArgumentParser(description='light-SRGAN training script.')
 
 parser.add_argument('--images_dir', default=r"/content/drive/MyDrive/images_001/original_images",
@@ -28,9 +25,6 @@ parser.add_argument('--discriminator_weights', default=None, type=str)
 
 args = parser.parse_args()
 
-# -----------------------------
-# Google Drive Paths
-# -----------------------------
 BASE_DIR = '/content/drive/MyDrive/LiteSRGAN_data'
 MODELS_DIR = os.path.join(BASE_DIR, 'models')
 GEN_DIR = os.path.join(BASE_DIR, 'generatedTrails')
@@ -41,11 +35,8 @@ TRAIN_DIR = os.path.join(CKPT_DIR, 'training')
 for d in [BASE_DIR, MODELS_DIR, GEN_DIR, CKPT_DIR, PRETRAIN_DIR, TRAIN_DIR]:
     os.makedirs(d, exist_ok=True)
 
-print(f"✅ All training data will be stored under: {BASE_DIR}")
+print(f" All training data will be stored under: {BASE_DIR}")
 
-# -----------------------------
-# Helper functions
-# -----------------------------
 def get_latest_checkpoint(dir_path, prefix):
     ckpts = [f for f in os.listdir(dir_path) if f.startswith(prefix) and f.endswith('.weights.h5')]
     if not ckpts:
@@ -76,9 +67,6 @@ def get_latest_checkpoint_training(dir_path, prefix, model_type):
     return os.path.join(dir_path, latest), epoch_num
 
 
-# -----------------------------
-# Initialize DataLoader and Model
-# -----------------------------
 dl = DataLoader(args)
 datagen = dl.dataGenerator()
 
@@ -86,16 +74,13 @@ lite_SRGAN = LiteSRGAN(args)
 lite_SRGAN_engine = LiteSRGAN_engine(args, lite_SRGAN)
 print("last layer shape of discriminator: ", lite_SRGAN.discriminator.output_shape)
 
-# =========================================================
-# === PRETRAINING PHASE ===================================
-# =========================================================
 latest_pre_ckpt, start_pre_epoch = get_latest_checkpoint(PRETRAIN_DIR, "pretraining_")
 
 if latest_pre_ckpt:
     lite_SRGAN.generator.load_weights(latest_pre_ckpt)
-    print(f"🔁 Resumed generator pretraining from {latest_pre_ckpt} (epoch {start_pre_epoch})")
+    print(f" Resumed generator pretraining from {latest_pre_ckpt} (epoch {start_pre_epoch})")
 else:
-    print("🚀 Starting generator pretraining from scratch...")
+    print(" Starting generator pretraining from scratch...")
     start_pre_epoch = -1
 
 for i in range(start_pre_epoch + 1, args.pretraining_epochs):
@@ -108,23 +93,17 @@ for i in range(start_pre_epoch + 1, args.pretraining_epochs):
 
 print("------------- End of generator pre-training -------------")
 
-# =========================================================
-# === MAIN TRAINING PHASE =================================
-# =========================================================
 latest_train_gen, start_train_epoch = get_latest_checkpoint_training(TRAIN_DIR, "training_", "generator")
 latest_train_disc, start_train_epoch_disc = get_latest_checkpoint_training(TRAIN_DIR, "training_", "discriminator")
 
 if latest_train_gen and latest_train_disc and (start_train_epoch == start_train_epoch_disc):
     lite_SRGAN.generator.load_weights(latest_train_gen)
     lite_SRGAN.discriminator.load_weights(latest_train_disc)
-    print(f"✅ Resumed full training from epoch {start_train_epoch}")
+    print(f" Resumed full training from epoch {start_train_epoch}")
 else:
     print("⚙️ Starting full SRGAN training from scratch...")
     start_train_epoch = -1
 
-# -----------------------------
-# Training Loop
-# -----------------------------
 for i in range(start_train_epoch + 1, args.epochs):
     print(f"============= SRGAN Training Epoch {i} =============")
     datagen = dl.dataGenerator()
@@ -142,13 +121,10 @@ for i in range(start_train_epoch + 1, args.epochs):
     lite_SRGAN.generator.save_weights(gen_ckpt_path)
     lite_SRGAN.discriminator.save_weights(disc_ckpt_path)
 
-    print(f"📍 Saved training checkpoint after epoch {i+1}")
+    print(f" Saved training checkpoint after epoch {i+1}")
 
-    # ==================================================
-    # === METRICS EVERY 3 EPOCHS =======================
-    # ==================================================
     if (i + 1) % 7 == 0:
-        print("\n🔍 Running Evaluation ...")
+        print("\n Running Evaluation ...")
         psnr_scores, ssim_scores, runtime_list = [], [], []
 
         eval_gen = dl.dataGenerator()
@@ -175,12 +151,12 @@ for i in range(start_train_epoch + 1, args.epochs):
                 ssim_scores.append(tf.image.ssim(s, h, max_val=1.0).numpy())
 
         if len(psnr_scores) > 0:
-            print("\n📊 ====== METRICS REPORT ======")
+            print("\n ====== METRICS REPORT ======")
             print(f"Epoch: {i+1}")
             print(f"Average PSNR   : {np.mean(psnr_scores):.4f} dB")
             print(f"Average SSIM   : {np.mean(ssim_scores):.4f}")
             print(f"Average Runtime: {np.mean(runtime_list):.6f} sec/image\n")
         else:
-            print("⚠️ Metrics skipped: No valid samples found.\n")
+            print(" Metrics skipped: No valid samples found.\n")
 
-print("🎉 Training completed and all data saved to Google Drive.")
+print(" Training completed and all data saved to Google Drive.")
